@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 const fileUpload = require('express-fileupload');
 require('dotenv').config();
 const app = express();
@@ -7,10 +8,16 @@ const bookingData = require('./fakedb.json');
 
 const port = process.env.PORT || 5000;
 
+// ----->>>> Middlewares <<<<-----
 app.use(cors());
 app.use(express.json());
 app.use(express.static('doctors'));
 app.use(fileUpload());
+
+const verifyToken = (req, res, next) => {
+    console.log('inside verify token', req.headers);
+    // next();
+}
 
 
 const { MongoClient, ServerApiVersion, string, ObjectId } = require('mongodb');
@@ -33,9 +40,85 @@ async function run() {
         const appointmentCollection = client.db("doctors-insight").collection("appointments");
         const serviceCollection = client.db("doctors-insight").collection("serviceDatabase");
         const doctorsCollection = client.db("doctors-insight").collection("availableDoctors");
+        const userCollection = client.db("doctors-insight").collection("users");
 
 
-        // ------->>> All services <<<------
+        //----->>>> JWT related api <<<<-----
+        app.post('/jwt', async (req, res) => {
+            const user = req.body;
+            const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+                expiresIn: '1h'
+            });
+            res.send({ token });
+        })
+
+
+        // ----->>>> Create user <<<<-----
+        app.post('/users', async (req, res) => {
+            const file = req.files.file;
+            const displayName = req.body.name;
+            const email = req.body.email;
+            const password = req.body.password;
+            const photoURL = `http://localhost:5000/${file.name}`;
+            // console.log(file, name, email, password, photoURL);
+            const newUser = { displayName, email, password, photoURL };
+
+            file.mv(`${__dirname}/doctors/${file.name}`, err => {
+                if (err) {
+                    console.log(err);
+                    return res.status(500).send({ msg: 'failed to upload image' })
+                }
+            })
+            const result = await userCollection.insertOne(newUser);
+            res.send(result);
+        })
+
+        // ----->>>> Load all user <<<<-----
+        app.get('/user', async (req, res) => {
+            console.log(req.headers);
+            const result = await userCollection.find().toArray();
+            // console.log(result)
+            res.send(result);
+        })
+
+        //---->>>> Delete user <<<<-----
+        app.delete('/user/:email', async (req, res) => {
+            const email = req.params.email;
+            const query = { email: email };
+            const result = await userCollection.deleteOne(query);
+            res.send(result);
+        })
+
+        //---->>> Make Admin for any user <<<---
+        app.patch('/user/admin/:id', async (req, res) => {
+            const id = req.params.id;
+            // console.log(id);
+            const filter = { _id: new ObjectId(id) };
+            const updateDoc = {
+                $set: {
+                    role: 'admin'
+                },
+            };
+            const result = await userCollection.updateOne(filter, updateDoc);
+            res.send(result);
+        })
+
+
+        //---->>> Make User for any admin <<<---
+        app.patch('/user/make-user/:id', async (req, res) => {
+            const id = req.params.id;
+            // console.log(id);
+            const filter = { _id: new ObjectId(id) };
+            const updateDoc = {
+                $set: {
+                    role: 'user'
+                },
+            };
+            const result = await userCollection.updateOne(filter, updateDoc);
+            res.send(result);
+        })
+
+        // ------->>> Load all services <<<------
         app.get('/booking', async (req, res) => {
             const allService = serviceCollection.find();
             const result = await allService.toArray();
@@ -73,19 +156,63 @@ async function run() {
         })
 
         // ----->>> All appointments collection <<<-----
-        app.get('/appointment', async (req, res) => {
-            const allApplication = appointmentCollection.find();
-            const result = await allApplication.toArray();
+        // app.get('/appointment', async (req, res) => {
+        //     const allApplication = appointmentCollection.find();
+        //     const result = await allApplication.toArray();
+        //     res.send(result);
+        // })
+
+
+        // ----->>>> Load All services <<<<-----
+        app.get('/services', async (req, res) => {
+            const allServices = await serviceCollection.find().toArray();
+            res.send(allServices);
+        })
+
+        // ----->>>> Load Individual Services <<<<-----
+        app.get('/services/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) };
+            const result = await serviceCollection.findOne(query);
+            res.send(result);
+        })
+
+        // ---->>>> Update services <<<<----
+        app.put('/services/:id', async (req, res) => {
+            const id = req.params.id;
+            const updateServiceItem = req.body;
+            // console.log(id, updateServiceItem)
+            const filter = { _id: new ObjectId(id) };
+            const options = { upsert: true };
+            const updatedService = {
+                $set: {
+                    name: updateServiceItem.name,
+                    space: updateServiceItem.space,
+                    price: updateServiceItem.price
+                }
+            }
+            const result = await serviceCollection.updateOne(filter, updatedService, options);
+            res.send(result);
+        })
+
+        // ------>>>< Delete services <<<<------
+        app.delete('/services/:id', async (req, res) => {
+            const id = req.params.id;
+            // console.log(id);
+            const query = { _id: new ObjectId(id) };
+            const result = await serviceCollection.deleteOne(query);
             res.send(result);
         })
 
         // ---->>> Appointments by particular date <<<-----
-        app.post('/appointmentsbydate', async (req, res) => {
+        app.post('/appointmentbydate', async (req, res) => {
             const date = req.body;
-            const email = req.body.email;
-            const query = appointmentCollection.find(date);
-            const result = await query.toArray();
+            // console.log(date);
+            // const email = req.body.email;
+            const query = { date: date.date };
+            const result = await appointmentCollection.find(query).toArray();
             res.send(result);
+            // console.log(result);
         })
 
         // ----->>> ADD a Doctor <<<-----
@@ -96,11 +223,48 @@ async function run() {
             res.send(result);
         })
 
+        // ----->>>> Load all doctor <<<<-----
         app.get('/addDoctor', async (req, res) => {
             const doctorsFiles = doctorsCollection.find();
             const result = await doctorsFiles.toArray();
             res.send(result);
             // console.log(result)
+        })
+
+        //----- >>>> Load Individual Doctor <<<<-----
+        app.get('/docInfo/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) };
+            const result = await doctorsCollection.findOne(query);
+            res.send(result);
+        })
+
+        // ---->>>> Update Doctor <<<<----
+        app.put('/docInfo/:id', async (req, res) => {
+            const id = req.params.id;
+            const updateDocInfo = req.body;
+            // console.log(id, updateServiceItem)
+            const filter = { _id: new ObjectId(id) };
+            const options = { upsert: true };
+            const updatedDoc = {
+                $set: {
+                    image: updateDocInfo.image,
+                    name: updateDocInfo.name,
+                    speciality: updateDocInfo.speciality,
+                    email: updateDocInfo.email
+                }
+            }
+            const result = await doctorsCollection.updateOne(filter, updatedDoc, options);
+            res.send(result);
+        })
+
+        // ------>>>< Delete Doctor <<<<------
+        app.delete('/docInfo/:id', async (req, res) => {
+            const id = req.params.id;
+            // console.log(id);
+            const query = { _id: new ObjectId(id) };
+            const result = await doctorsCollection.deleteOne(query);
+            res.send(result);
         })
 
 

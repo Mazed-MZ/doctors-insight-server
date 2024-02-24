@@ -14,11 +14,6 @@ app.use(express.json());
 app.use(express.static('doctors'));
 app.use(fileUpload());
 
-const verifyToken = (req, res, next) => {
-    console.log('inside verify token', req.headers);
-    // next();
-}
-
 
 const { MongoClient, ServerApiVersion, string, ObjectId } = require('mongodb');
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.vp86zhc.mongodb.net/?retryWrites=true&w=majority`;
@@ -52,8 +47,34 @@ async function run() {
             res.send({ token });
         })
 
+        const verifyToken = (req, res, next) => {
+            // console.log('inside verify token', req.headers);
+            if (!req.headers.authorization) {
+                return res.status(401).send({ message: 'unauthorized access' });
+            }
+            const token = req.headers.authorization.split(' ')[1]
+            jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+                if (err) {
+                    return res.status(403).send({ message: 'forbidden access' })
+                }
+                req.decoded = decoded;
+                next();
+            })
+        }
 
-        // ----->>>> Create user <<<<-----
+        //------>>>> create verifyAdmin function <<<<----
+        const verifyAdmin = async (req, res, next) => {
+            const email = req.decoded.email;
+            const query = { email: email };
+            const user = await userCollection.findOne(query);
+            if (user?.role !== 'admin') {
+                return res.status(403).send({ error: true, message: 'forbidden access' });
+            }
+            next()
+        }
+
+
+        // ----->>>> Create email-pass user <<<<-----
         app.post('/users', async (req, res) => {
             const file = req.files.file;
             const displayName = req.body.name;
@@ -73,9 +94,26 @@ async function run() {
             res.send(result);
         })
 
+        // ----->>>> Create Google User <<<<-----
+        app.post('/googleuser', async (req, res) => {
+            const displayName = req.body.displayName;
+            const email = req.body.email;
+            const photoURL = req.body.photoURL;
+            const googleUser = { displayName, email, photoURL };
+            // console.log(googleUser);
+            const query = { email: googleUser.email }
+            const existingUser = await userCollection.findOne(query);
+            // console.log('existing user', existingUser);
+            if (existingUser) {
+                return res.send({ message: 'user already exists' })
+            }
+            const result = await userCollection.insertOne(googleUser);
+            res.send(result);
+        })
+
         // ----->>>> Load all user <<<<-----
-        app.get('/user', async (req, res) => {
-            console.log(req.headers);
+        app.get('/user', verifyToken, verifyAdmin, async (req, res) => {
+            // console.log(req.headers);
             const result = await userCollection.find().toArray();
             // console.log(result)
             res.send(result);
@@ -115,6 +153,20 @@ async function run() {
                 },
             };
             const result = await userCollection.updateOne(filter, updateDoc);
+            res.send(result);
+        })
+
+        //=====>>>> Check admin <<<<=====
+        app.get('/user/admin/:email', verifyToken, async (req, res) => {
+            const email = req.params.email;
+
+            if (req.decoded.email !== email) {
+                res.send({ admin: false })
+            }
+
+            const query = { email: email };
+            const user = await userCollection.findOne(query);
+            const result = { admin: user?.role === 'admin' };
             res.send(result);
         })
 

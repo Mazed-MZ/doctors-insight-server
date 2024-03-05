@@ -4,6 +4,12 @@ const jwt = require('jsonwebtoken');
 const fileUpload = require('express-fileupload');
 require('dotenv').config();
 const app = express();
+
+const SSLCommerzPayment = require('sslcommerz-lts');
+const store_id = process.env.SSL_STORE_ID;
+const store_passwd = process.env.SSL_STORE_PASS;
+const is_live = false //true for live, false for sandbox
+
 const bookingData = require('./fakedb.json');
 
 const port = process.env.PORT || 5000;
@@ -36,6 +42,7 @@ async function run() {
         const serviceCollection = client.db("doctors-insight").collection("serviceDatabase");
         const doctorsCollection = client.db("doctors-insight").collection("availableDoctors");
         const userCollection = client.db("doctors-insight").collection("users");
+        const paymentCollection = client.db("doctors-insight").collection("payments");
 
 
         //----->>>> JWT related api <<<<-----
@@ -256,6 +263,53 @@ async function run() {
             res.send(result);
         })
 
+        // ----->>>> Create payment proceed <<<<-----
+        app.post('/proceed-payment', async (req, res) => {
+            const selectedAppointment = await appointmentCollection.findOne({ _id: new ObjectId(req.body.patientId) });
+            const paymentInfo = req.body;
+            const trans_id = new ObjectId().toString();
+            // console.log(selectedAppointment);
+            const data = {
+                total_amount: selectedAppointment?.price,
+                currency: paymentInfo.currency,
+                tran_id: trans_id, // use unique tran_id for each api call
+                success_url: 'http://localhost:3030/success',
+                fail_url: 'http://localhost:3030/fail',
+                cancel_url: 'http://localhost:3030/cancel',
+                ipn_url: 'http://localhost:3030/ipn',
+                shipping_method: 'Onsite',
+                product_name: paymentInfo.name,
+                product_category: '',
+                product_profile: 'general',
+                cus_name: paymentInfo.patient,
+                cus_email: selectedAppointment?.email,
+                cus_add1: 'Dhaka',
+                cus_add2: 'Dhaka',
+                cus_city: 'Dhaka',
+                cus_state: 'Dhaka',
+                cus_postcode: '1000',
+                cus_country: 'Bangladesh',
+                cus_phone: paymentInfo.phone,
+                cus_fax: '01711111111',
+                ship_name: 'Customer Name',
+                ship_add1: 'Dhaka',
+                ship_add2: 'Dhaka',
+                ship_city: 'Dhaka',
+                ship_state: 'Dhaka',
+                ship_postcode: 1000,
+                ship_country: 'Bangladesh',
+            };
+            // console.log(data);
+
+            const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live)
+            sslcz.init(data).then(apiResponse => {
+                // Redirect the user to payment gateway
+                let GatewayPageURL = apiResponse.GatewayPageURL
+                res.send({ url: GatewayPageURL })
+                console.log('Redirecting to: ', GatewayPageURL)
+            });
+        })
+
         // ---->>> Appointments by particular date <<<-----
         app.post('/appointmentbydate', async (req, res) => {
             const date = req.body;
@@ -265,6 +319,36 @@ async function run() {
             const result = await appointmentCollection.find(query).toArray();
             res.send(result);
             // console.log(result);
+        })
+
+        // ----->>>> Appointments by each user <<<<-----
+        app.get('/appointments/:email', async (req, res) => {
+            const email = req.params.email
+            // console.log(email);
+            const query = { email: email };
+            const result = await appointmentCollection.find(query).toArray();
+            // console.log(result);
+            res.send(result)
+        })
+
+        // ----->>>> Load selected appointment <<<<-----
+        app.get('/appointment-payment/:id', async (req, res) => {
+            const id = req.params.id;
+            // console.log(id);
+            const query = { _id: new ObjectId(id) };
+            const result = await appointmentCollection.findOne(query);
+            // console.log(result);
+            res.send(result)
+        })
+
+        // ----->>>> Delete selected appointment <<<<-----
+        app.delete('/appointments/:id', async (req, res) => {
+            const id = req.params.id;
+            // console.log(id);
+            const query = { _id: new ObjectId(id) };
+            const result = await appointmentCollection.deleteOne(query);
+            // console.log(result);
+            res.send(result)
         })
 
         // ----->>> ADD a Doctor <<<-----

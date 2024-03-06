@@ -54,6 +54,9 @@ async function run() {
     const paymentCollection = client
       .db("doctors-insight")
       .collection("payments");
+    const reviewCollection = client
+      .db("doctors-insight")
+      .collection("reviews");
 
     //----->>>> JWT related api <<<<-----
     app.post("/jwt", async (req, res) => {
@@ -279,7 +282,7 @@ async function run() {
     app.post("/create-payment-intent", async (req, res) => {
       const { price } = req.body;
       const amount = parseInt(price * 100);
-      console.log(amount, 'amount is here');
+      console.log(amount, "amount is here");
 
       const paymentIntent = await stripe.paymentIntents.create({
         amount: amount,
@@ -297,12 +300,19 @@ async function run() {
       console.log(paymentHistory);
       const paymentResult = await paymentCollection.insertOne(paymentHistory);
 
-    //   //carefully delete each item from the cart
-    //   // console.log('payment info', paymentHistory);
-      const query = await appointmentCollection.findOne({ _id: new ObjectId(paymentHistory.cartIds) });
+      //   //carefully delete each item from the cart
+      //   // console.log('payment info', paymentHistory);
+      const query = await appointmentCollection.findOne({
+        _id: new ObjectId(paymentHistory.cartIds),
+      });
       const deleteResult = await paymentCollection.deleteOne(query);
       const deleteAppointment = await appointmentCollection.deleteOne(query);
-      res.send(paymentHistory.status, paymentResult, deleteResult, deleteAppointment);
+      res.send(
+        paymentHistory.status,
+        paymentResult,
+        deleteResult,
+        deleteAppointment
+      );
     });
 
     // ---->>>> Load Payment History <<<<----
@@ -458,6 +468,39 @@ async function run() {
       // console.log(id);
       const query = { _id: new ObjectId(id) };
       const result = await doctorsCollection.deleteOne(query);
+      res.send(result);
+    });
+
+    // ----->>>> Add review <<<<-----
+    app.post("/addreview", async (req, res) => {
+      const review = req.body;
+      // console.log(review);
+      const result = await reviewCollection.insertOne(review);
+      res.send(result);
+    });
+
+    // ---->>>> Load Reviews <<<<----
+    app.get("/addreview", async (req, res) => {
+      const allReview = reviewCollection.find();
+      const result = await allReview.toArray();
+      res.send(result);
+    });
+
+    // ----->>>> Load individual reviews <<<<-----
+    app.get('/addreview/:email', async (req, res) => {
+      const email = req.params.email;
+      // console.log(email);
+      const query = { userEmail: email};
+      const result = await reviewCollection.findOne(query);
+      res.send(result);
+    })
+
+    // ---->>>> Delete Review <<<<----
+    app.delete("/addreview/:id", async (req, res) => {
+      const id = req.params.id;
+      // console.log(email);
+      const query = { _id: new ObjectId(id) };
+      const result = await reviewCollection.deleteOne(query);
       res.send(result);
     });
 
